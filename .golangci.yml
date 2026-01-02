@@ -29,6 +29,7 @@ linters:
     - godox # "todo" and "fixme" comments are allowed
     - goheader # No need
     - gosmopolitan # No need
+    - funcorder # Unexported utility functions should be grouped together with their calling, exported functions
     - grouper # Imports take care of themselves, rest is common sense
     - ireturn # This is just not necessary or practical in a real codebase
     - lll # Auto formatters do this and what they can't do I don't care about
@@ -54,6 +55,8 @@ linters:
           - prealloc # These kinds of optimisations will make no difference to test code
           - gosec # Tests don't need security stuff
           - goconst # Sometimes repetition is okay in tests
+          - errcheck # Test setup code doesn't need error checking
+          - wsl_v5 # Whitespace linting less important in tests
 
   settings:
     cyclop:
@@ -92,6 +95,9 @@ linters:
 
     nakedret:
       max-func-lines: 0 # Disallow any naked returns
+
+    interfacebloat:
+      max: 20 # The default of 10 seems too small at times
 
     nolintlint:
       allow-unused: false

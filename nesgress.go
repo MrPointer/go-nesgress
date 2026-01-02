@@ -16,21 +16,28 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-// ANSI escape codes for terminal control
+// ANSI escape codes for terminal control.
 const (
 	clearLine  = "\033[K"    // Clear line from cursor to end
 	showCursor = "\033[?25h" // Show cursor
 )
 
+// Duration constants for display formatting.
+const (
+	durationDisplayThreshold = 100 * time.Millisecond // Minimum duration to show timing info
+	durationRoundPrecision   = 10 * time.Millisecond  // Round displayed durations to this precision
+	spinnerTickInterval      = 50 * time.Millisecond  // How often spinner checks for updates
+)
+
 // ProgressOperation represents an active progress operation.
 type ProgressOperation struct {
-	Message    string
 	StartTime  time.Time
-	Level      int
-	done       atomic.Int32 // atomic
-	Success    bool
 	Error      error
 	CancelFunc context.CancelFunc
+	Message    string
+	Level      int
+	done       atomic.Int32
+	Success    bool
 }
 
 // IsDone returns whether this operation is completed.
@@ -43,9 +50,24 @@ func (op *ProgressOperation) SetDone() {
 	op.done.Store(1)
 }
 
+// Resumable defines the interface for pausing and resuming progress operations.
+type Resumable interface {
+	// Pause temporarily stops all spinner operations for interactive commands.
+	Pause() error
+	// Resume restarts spinner operations after interactive commands complete.
+	Resume() error
+
+	// IsActive returns true if there are any active progress operations.
+	IsActive() bool
+	// IsPaused returns whether the progress display is currently paused.
+	IsPaused() bool
+}
+
 // ProgressReporter defines the interface for hierarchical progress reporting.
 type ProgressReporter interface {
 	io.Closer
+	Resumable
+
 	// Start begins a new progress operation with the given message
 	Start(message string) error
 	// Update modifies the message of the current progress operation
@@ -66,31 +88,22 @@ type ProgressReporter interface {
 
 	// Clear stops all progress operations without displaying completion messages
 	Clear() error
-	// Pause temporarily stops all spinner operations for interactive commands
-	Pause() error
-	// Resume restarts spinner operations after interactive commands complete
-	Resume() error
-
-	// IsActive returns true if there are any active progress operations
-	IsActive() bool
-	// IsPaused returns whether the progress display is currently paused
-	IsPaused() bool
 }
 
 // ProgressDisplay provides hierarchical progress reporting with npm-style output.
 type ProgressDisplay struct {
 	output              io.Writer
-	safeBuffer          *safeBytesBuffer // for thread-safe buffer access when using bytes.Buffer
 	rawOutput           io.Writer        // original output for direct access when needed
-	progressStack       []*ProgressOperation
+	safeBuffer          *safeBytesBuffer // for thread-safe buffer access when using bytes.Buffer
 	activeSpinner       *ProgressOperation
-	operationInProgress atomic.Int32   // atomic counter
-	persistentMode      bool           // whether we're in persistent mode
-	cursorHidden        atomic.Int32   // atomic flag for cursor state
-	paused              atomic.Int32   // atomic flag for paused state
-	pauseMutex          sync.Mutex     // protects pause/resume operations
+	progressStack       []*ProgressOperation
 	spinnerWaitGroup    sync.WaitGroup // tracks active spinner goroutines
 	stackMutex          sync.RWMutex   // protects progressStack and activeSpinner
+	pauseMutex          sync.Mutex     // protects pause/resume operations
+	operationInProgress atomic.Int32   // atomic counter
+	cursorHidden        atomic.Int32   // atomic flag for cursor state
+	paused              atomic.Int32   // atomic flag for paused state
+	persistentMode      bool           // whether we're in persistent mode
 }
 
 var _ ProgressReporter = (*ProgressDisplay)(nil)
@@ -102,9 +115,11 @@ func NewProgressDisplay(output io.Writer) *ProgressDisplay {
 	}
 
 	var outputWriter io.Writer
+
 	var safeBuffer *safeBytesBuffer
 
 	// Special handling for *bytes.Buffer to ensure thread safety
+
 	if buf, ok := output.(*bytes.Buffer); ok {
 		safeBuffer = &safeBytesBuffer{buf: buf}
 		outputWriter = safeBuffer
@@ -155,6 +170,7 @@ func (p *ProgressDisplay) Start(message string) error {
 
 	// Start spinner in background
 	p.spinnerWaitGroup.Add(1)
+
 	go p.runSpinner(ctx, operation, displayMessage)
 
 	return nil
@@ -180,6 +196,7 @@ func (p *ProgressDisplay) Update(message string) error {
 // Finish completes the current progress operation successfully.
 func (p *ProgressDisplay) Finish(message string) error {
 	p.stackMutex.Lock()
+
 	if len(p.progressStack) == 0 {
 		p.stackMutex.Unlock()
 		return nil
@@ -195,6 +212,7 @@ func (p *ProgressDisplay) Finish(message string) error {
 	if operation.CancelFunc != nil {
 		operation.CancelFunc()
 	}
+
 	operation.SetDone()
 	operation.Success = true
 
@@ -202,16 +220,16 @@ func (p *ProgressDisplay) Finish(message string) error {
 	p.spinnerWaitGroup.Wait()
 
 	// Ensure cursor is restored before displaying completion message
-	if err := p.restoreCursor(); err != nil {
-		return err
+	if restoreErr := p.restoreCursor(); restoreErr != nil {
+		return restoreErr
 	}
 
 	// Decrement operation counter
 	p.operationInProgress.Add(-1)
 
 	// Display completion message
-	if err := p.displayCompletion(operation, true, nil); err != nil {
-		return err
+	if displayErr := p.displayCompletion(operation, true, nil); displayErr != nil {
+		return displayErr
 	}
 
 	// Resume parent operation if exists
@@ -225,6 +243,7 @@ func (p *ProgressDisplay) Finish(message string) error {
 // Fail completes the current progress operation with an error.
 func (p *ProgressDisplay) Fail(message string, err error) error {
 	p.stackMutex.Lock()
+
 	if len(p.progressStack) == 0 {
 		p.stackMutex.Unlock()
 		return nil
@@ -240,6 +259,7 @@ func (p *ProgressDisplay) Fail(message string, err error) error {
 	if operation.CancelFunc != nil {
 		operation.CancelFunc()
 	}
+
 	operation.SetDone()
 	operation.Success = false
 	operation.Error = err
@@ -248,16 +268,16 @@ func (p *ProgressDisplay) Fail(message string, err error) error {
 	p.spinnerWaitGroup.Wait()
 
 	// Ensure cursor is restored before displaying completion message
-	if err := p.restoreCursor(); err != nil {
-		return err
+	if restoreErr := p.restoreCursor(); restoreErr != nil {
+		return restoreErr
 	}
 
 	// Decrement operation counter
 	p.operationInProgress.Add(-1)
 
 	// Display failure message
-	if err := p.displayCompletion(operation, false, err); err != nil {
-		return err
+	if displayErr := p.displayCompletion(operation, false, err); displayErr != nil {
+		return displayErr
 	}
 
 	// Resume parent operation if exists
@@ -281,6 +301,7 @@ func (p *ProgressDisplay) Clear() error {
 		if operation.CancelFunc != nil {
 			operation.CancelFunc()
 		}
+
 		operation.SetDone()
 	}
 
@@ -299,7 +320,7 @@ func (p *ProgressDisplay) Clear() error {
 	return p.restoreCursor()
 }
 
-// Pause temporarily stops all spinner operations for interactive commands
+// Pause temporarily stops all spinner operations for interactive commands.
 func (p *ProgressDisplay) Pause() error {
 	p.pauseMutex.Lock()
 	defer p.pauseMutex.Unlock()
@@ -323,15 +344,16 @@ func (p *ProgressDisplay) Pause() error {
 	}
 
 	if file, ok := p.rawOutput.(*os.File); ok {
+		//nolint:errcheck // Best effort write during pause, errors not critical
 		file.WriteString("\r" + clearLine)
 	} else {
-		fmt.Fprint(p.output, "\r"+clearLine)
+		_, _ = fmt.Fprint(p.output, "\r"+clearLine)
 	}
 
 	return nil
 }
 
-// Resume restarts spinner operations after interactive commands complete
+// Resume restarts spinner operations after interactive commands complete.
 func (p *ProgressDisplay) Resume() error {
 	p.pauseMutex.Lock()
 	defer p.pauseMutex.Unlock()
@@ -340,6 +362,7 @@ func (p *ProgressDisplay) Resume() error {
 
 	// Resume the most recent operation if there is one
 	p.stackMutex.Lock()
+
 	if len(p.progressStack) > 0 {
 		currentOperation := p.progressStack[len(p.progressStack)-1]
 		if !currentOperation.IsDone() {
@@ -351,6 +374,7 @@ func (p *ProgressDisplay) Resume() error {
 			displayMessage := p.buildContextualMessage()
 			p.stackMutex.Unlock()
 			p.spinnerWaitGroup.Add(1)
+
 			go p.runSpinner(ctx, currentOperation, displayMessage)
 		} else {
 			p.stackMutex.Unlock()
@@ -362,7 +386,7 @@ func (p *ProgressDisplay) Resume() error {
 	return nil
 }
 
-// IsPaused returns whether the progress display is currently paused
+// IsPaused returns whether the progress display is currently paused.
 func (p *ProgressDisplay) IsPaused() bool {
 	return p.paused.Load() == 1
 }
@@ -377,6 +401,7 @@ func (p *ProgressDisplay) StartPersistent(message string) error {
 func (p *ProgressDisplay) LogAccomplishment(message string) error {
 	checkmark := lipgloss.NewStyle().Foreground(lipgloss.Color("#2ecc71")).Render("✓")
 	_, err := fmt.Fprintf(p.output, "\r%s   %s %s\n", clearLine, checkmark, message)
+
 	return err
 }
 
@@ -404,7 +429,7 @@ func (p *ProgressDisplay) setupCleanup() {
 }
 
 // resumeParentOperation resumes the spinner for the parent operation if one exists.
-// Note: This method assumes the caller holds a lock on stackMutex
+// Note: This method assumes the caller holds a lock on stackMutex.
 func (p *ProgressDisplay) resumeParentOperation() {
 	if len(p.progressStack) == 0 {
 		p.activeSpinner = nil
@@ -423,6 +448,7 @@ func (p *ProgressDisplay) resumeParentOperation() {
 		displayMessage := p.buildContextualMessage()
 
 		p.spinnerWaitGroup.Add(1)
+
 		go p.runSpinner(ctx, prevOperation, displayMessage)
 	}
 }
@@ -438,9 +464,10 @@ func (p *ProgressDisplay) displayCompletion(operation *ProgressOperation, succes
 	}
 
 	var displayMessage string
+
 	if success {
-		if duration > 100*time.Millisecond {
-			displayMessage = fmt.Sprintf("%s (took %v)", operation.Message, duration.Round(10*time.Millisecond))
+		if duration > durationDisplayThreshold {
+			displayMessage = fmt.Sprintf("%s (took %v)", operation.Message, duration.Round(durationRoundPrecision))
 		} else {
 			displayMessage = operation.Message
 		}
@@ -449,8 +476,8 @@ func (p *ProgressDisplay) displayCompletion(operation *ProgressOperation, succes
 		checkmark := lipgloss.NewStyle().Foreground(lipgloss.Color("#2ecc71")).Render("✓")
 		fmt.Fprintf(p.output, "\r%s%s %s\n", clearLine, checkmark, displayMessage)
 	} else {
-		if duration > 100*time.Millisecond {
-			displayMessage = fmt.Sprintf("%s (failed after %v)", operation.Message, duration.Round(10*time.Millisecond))
+		if duration > durationDisplayThreshold {
+			displayMessage = fmt.Sprintf("%s (failed after %v)", operation.Message, duration.Round(durationRoundPrecision))
 		} else {
 			displayMessage = operation.Message
 		}
@@ -458,6 +485,7 @@ func (p *ProgressDisplay) displayCompletion(operation *ProgressOperation, succes
 		// Print failure message without indentation for minimal output
 		cross := lipgloss.NewStyle().Foreground(lipgloss.Color("#e74c3c")).Render("✗")
 		errorMsg := fmt.Sprintf("\r%s%s %s", clearLine, cross, displayMessage)
+
 		if err != nil {
 			errorMsg += fmt.Sprintf("\n  Error: %v", err)
 		}
@@ -502,7 +530,7 @@ func (p *ProgressDisplay) runSpinner(ctx context.Context, operation *ProgressOpe
 
 	// Run spinner with a simple action that waits for completion
 	s.ActionWithErr(func(spinnerCtx context.Context) error {
-		ticker := time.NewTicker(50 * time.Millisecond)
+		ticker := time.NewTicker(spinnerTickInterval)
 		defer ticker.Stop()
 
 		for {
@@ -514,9 +542,11 @@ func (p *ProgressDisplay) runSpinner(ctx context.Context, operation *ProgressOpe
 				if p.IsPaused() {
 					return nil
 				}
+
 				if operation == nil {
 					return errors.New("no operation in progress")
 				}
+
 				if operation.IsDone() {
 					return nil
 				}
@@ -525,18 +555,20 @@ func (p *ProgressDisplay) runSpinner(ctx context.Context, operation *ProgressOpe
 	})
 
 	// Run the spinner
-	s.Run()
+	//nolint:errcheck // Spinner errors are handled by context cancellation
+	_ = s.Run()
 }
 
 // buildContextualMessage creates a hierarchical message showing the full context
-// Note: This method assumes the caller holds a lock on stackMutex
+// Note: This method assumes the caller holds a lock on stackMutex.
 func (p *ProgressDisplay) buildContextualMessage() string {
 	if len(p.progressStack) == 0 {
 		return ""
 	}
 
 	// Build context from all operations in the stack
-	var parts []string
+	parts := make([]string, 0, len(p.progressStack))
+
 	for _, op := range p.progressStack {
 		parts = append(parts, op.Message)
 	}
@@ -573,5 +605,6 @@ func (p *ProgressDisplay) GetOutputSafely() string {
 	if p.safeBuffer != nil {
 		return p.safeBuffer.SafeString()
 	}
+
 	return ""
 }
