@@ -15,6 +15,7 @@ type synchronizedWriter struct {
 func (sw *synchronizedWriter) Write(p []byte) (n int, err error) {
 	sw.mutex.Lock()
 	defer sw.mutex.Unlock()
+
 	return sw.writer.Write(p)
 }
 
@@ -27,12 +28,14 @@ type safeBytesBuffer struct {
 func (sbb *safeBytesBuffer) Write(p []byte) (n int, err error) {
 	sbb.mutex.Lock()
 	defer sbb.mutex.Unlock()
+
 	return sbb.buf.Write(p)
 }
 
-// SafeString provides thread-safe read access to buffer content
+// SafeString provides thread-safe read access to buffer content.
 func (sbb *safeBytesBuffer) SafeString() string {
 	sbb.mutex.RLock()
 	defer sbb.mutex.RUnlock()
+
 	return sbb.buf.String()
 }
