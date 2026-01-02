@@ -1,6 +1,6 @@
 module github.com/MrPointer/go-nesgress
 
-go 1.25.5
+go 1.24.0
 
 require (
 	github.com/charmbracelet/huh/spinner v0.0.0-20251215014908-6f7d32faaff3
