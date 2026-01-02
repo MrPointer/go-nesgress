@@ -33,8 +33,8 @@ const (
 type ProgressOperation struct {
 	StartTime  time.Time
 	Error      error
-	Message    string
 	CancelFunc context.CancelFunc
+	Message    string
 	Level      int
 	done       atomic.Int32
 	Success    bool
@@ -92,18 +92,18 @@ type ProgressReporter interface {
 
 // ProgressDisplay provides hierarchical progress reporting with npm-style output.
 type ProgressDisplay struct {
-	progressStack       []*ProgressOperation
-	stackMutex          sync.RWMutex   // protects progressStack and activeSpinner
-	spinnerWaitGroup    sync.WaitGroup // tracks active spinner goroutines
 	output              io.Writer
 	rawOutput           io.Writer        // original output for direct access when needed
-	pauseMutex          sync.Mutex       // protects pause/resume operations
 	safeBuffer          *safeBytesBuffer // for thread-safe buffer access when using bytes.Buffer
 	activeSpinner       *ProgressOperation
-	operationInProgress atomic.Int32 // atomic counter
-	cursorHidden        atomic.Int32 // atomic flag for cursor state
-	paused              atomic.Int32 // atomic flag for paused state
-	persistentMode      bool         // whether we're in persistent mode
+	progressStack       []*ProgressOperation
+	spinnerWaitGroup    sync.WaitGroup // tracks active spinner goroutines
+	stackMutex          sync.RWMutex   // protects progressStack and activeSpinner
+	pauseMutex          sync.Mutex     // protects pause/resume operations
+	operationInProgress atomic.Int32   // atomic counter
+	cursorHidden        atomic.Int32   // atomic flag for cursor state
+	paused              atomic.Int32   // atomic flag for paused state
+	persistentMode      bool           // whether we're in persistent mode
 }
 
 var _ ProgressReporter = (*ProgressDisplay)(nil)
