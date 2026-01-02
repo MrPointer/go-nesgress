@@ -1,0 +1,15 @@
+# Changes here will be overwritten by Copier
+_commit: v0.54.1
+_src_path: gh:FollowTheProcess/go-template
+author_name: Timor Gruber
+dependency_bot: renovate
+description: A Go library for hierarchical progress reporting with nested spinner
+    displays
+github_url: https://github.com/MrPointer/go-nesgress
+github_username: MrPointer
+license: MIT
+linter: golangci-lint
+module_path: github.com/MrPointer/go-nesgress
+project_name: go-nesgress
+project_slug: go-nesgress
+project_type: library
