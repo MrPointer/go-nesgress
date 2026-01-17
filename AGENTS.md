@@ -1,52 +1,60 @@
 # AGENTS.md
 
-This file provides guidance to Code Agents when working with code in this repository.
+This file provides context for Code Agents working with this repository.
 
-## Project Overview
+## What Problem Does This Solve?
 
-go-nesgress is a Go library for hierarchical progress reporting with nested spinner displays. The name is a pun on "nested progress". It provides thread-safe progress operations with spinner animations using charmbracelet/huh.
+Terminal-based applications need to communicate progress to users during long-running operations. Simple approaches have limitations:
 
-## Build and Test Commands
+**Print-based progress** (e.g., "Downloading...", "Downloaded") creates cluttered output when operations are nested. For example, a deployment might involve downloading, compiling, and uploading - each with their own sub-steps. Print-based progress loses the hierarchical context.
 
-```bash
-# Run all tests
-go test ./...
+**Spinner libraries** improve visual appeal but typically handle only flat progress. They don't naturally support nested operations where you want to show "Deploying: Building: Compiling main.go" as context.
 
-# Run tests with verbose output
-go test -v ./...
+**Custom solutions** end up reimplementing the same patterns: managing a stack of operations, handling terminal control codes, coordinating goroutines for animations, and ensuring thread safety. This is error-prone and distracts from actual application logic.
 
-# Run tests excluding integration tests (short mode)
-go test -short ./...
+go-nesgress solves this by providing hierarchical progress reporting out of the box. It maintains context across nested operations, handles all terminal complexity, and works safely from concurrent goroutines.
 
-# Run a specific test
-go test -v -run TestName ./...
-```
+## Design Goals
 
-## Architecture
+**Hierarchical by default** - Progress operations naturally nest. The library's core model is a stack that tracks parent-child relationships and displays them as context.
 
-The library has three main components:
+**Zero configuration** - No setup, no initialization, no decisions. Call the constructor and it works with sensible defaults.
 
-1. **ProgressReporter interface** (`nesgress.go`) - Defines the contract for progress reporting with methods for starting/finishing operations, persistent mode, and pause/resume support.
+**Thread-safe** - All methods work safely from any goroutine without requiring external synchronization. Concurrent progress reporting just works.
 
-2. **ProgressDisplay** (`nesgress.go`) - The main implementation that manages:
-   - A stack of `ProgressOperation` structs for nested hierarchy
-   - Background spinner goroutines via charmbracelet/huh/spinner
-   - Thread-safe state with atomic operations and mutexes
-   - Terminal cursor control (hide/show)
+**Non-invasive** - Progress reporting shouldn't affect application logic. If display fails, the application continues normally.
 
-3. **NoopProgressDisplay** (`noop.go`) - A no-op implementation for testing or disabling output.
+**Clean visuals** - Spinners animate smoothly, completions show timing, hierarchy provides context. The goal is npm-style polish in Go applications.
 
-### Thread Safety
+## When to Use This Library
 
-- `synchronizedWriter` and `safeBytesBuffer` (`writer.go`) wrap io.Writer for concurrent access
-- `stackMutex` protects the progress stack and active spinner
-- `pauseMutex` protects pause/resume operations
-- Atomic flags track operation count, cursor state, and paused state
-- `spinnerWaitGroup` ensures spinner goroutines complete before state changes
+**Multi-step operations** where users benefit from seeing progress context (installers, deployment tools, build systems).
 
-### Key Patterns
+**Nested workflows** where inner operations need to report progress while maintaining outer context (package managers, migration tools).
 
-- Operations use context cancellation to stop spinners
-- Nested operations show hierarchical context (e.g., "Parent: Child: Grandchild")
-- Completion messages show timing only for operations >100ms
-- Persistent mode allows logging accomplishments that remain visible
+**Concurrent operations** where multiple goroutines report progress simultaneously (parallel downloads, batch processing).
+
+**Long-running CLI tools** where visual feedback prevents users from thinking the program has hung.
+
+## When NOT to Use This Library
+
+**Silent background services** - If there's no user watching, progress display adds overhead without benefit.
+
+**High-frequency operations** - Sub-100ms operations don't benefit from progress display. The library filters these out, but if most operations are trivial, the library adds unnecessary complexity.
+
+**Non-terminal output** - The library assumes terminal output. It won't work well if output is redirected to files or parsed by other programs (though the noop implementation can handle this case).
+
+**GUIs or web interfaces** - This is specifically for terminal/CLI applications.
+
+## Technical Resources
+
+- **Architecture and patterns:** [docs/architecture.md](docs/architecture.md)
+- **Build commands:** Use `task` (see Taskfile.yml) - `task test`, `task lint`, `task check`
+
+## Philosophy
+
+This is a **library, not a framework**. It does one thing (hierarchical progress reporting) and does it well. It has minimal dependencies, a small API surface, and stays out of the way.
+
+The library should feel natural to Go developers. It uses standard patterns (interfaces, context cancellation, io.Writer) and follows Go conventions. There's no magic, no global state, no complex configuration.
+
+Progress reporting is supporting functionality, not the main show. The library is designed so applications can integrate it easily and forget about it. It works quietly in the background, providing value without demanding attention.
