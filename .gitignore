@@ -42,9 +42,21 @@
 
 # Agents
 !AGENTS.md
+!.claude/skills/
 !.claude/skills/*
+!.claude/skills/**/*
+!.claude/agents/
 !.claude/agents/*
+!.claude/agents/**/*
+!.claude/plans/
 !.claude/plans/*
+!.claude/plans/**/*
+!.opencode/skills
 !.opencode/skills/*
+!.opencode/skills/**/*
+!.opencode/agent/
 !.opencode/agent/*
+!.opencode/agent/**/*
+!.opencode/plans
 !.opencode/plans/*
+!.opencode/plans/**/*
