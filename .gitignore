@@ -26,6 +26,9 @@
 !README.md
 !LICENSE
 !img/**/*
+!docs/
+!docs/*
+!docs/**/*
 !docs/img/**/*
 
 # Typos
